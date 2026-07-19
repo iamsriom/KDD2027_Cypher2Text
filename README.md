@@ -38,7 +38,13 @@ No generated model outputs, result files, or credentials are committed.
 
 ## Human Evaluation
 
-We include a human study of Cypher-to-Text translations produced with CSEncoder + GPT-4o-mini. Three independent annotators (`HA1`, `HA2`, `HA3`) judge whether each model translation is a faithful natural-language rendering of the Cypher query, relative to the gold text. Labels are binary (`1` = acceptable, `0` = not acceptable). Spreadsheets also include an automatic LLM-as-judge column for comparison.
+We include a human study of Cypher-to-Text translations produced with CSEncoder + GPT-4o-mini. Three independent **Cypher experts** (`HA1`, `HA2`, `HA3`) annotated each example. For every query, annotators were assigned to read:
+
+1. the Cypher query,
+2. the gold natural-language translation, and
+3. the LLM-generated translation (CSEncoder + GPT-4o-mini),
+
+then mark the model output as `1` (acceptable / faithful) or `0` (not acceptable). Spreadsheets also include an automatic LLM-as-judge column for comparison.
 
 Annotation packages live in `HumanEvaluation/`:
 
@@ -50,7 +56,7 @@ Annotation packages live in `HumanEvaluation/`:
 
 **Total:** 150 queries × 3 annotators.
 
-Each worksheet contains the query id, Cypher query, gold translation, CSEncoder+GPT-4o-mini translation, Cypher pattern tags, `llm_as_judge`, and the three human scores. A trailing summary row reports per-annotator totals.
+Each worksheet contains the query id, Cypher query, gold translation, CSEncoder+GPT-4o-mini translation, Cypher pattern tags, `llm_as_judge`, and the three human scores. A trailing summary row reports per-annotator and LLM-as-judge totals.
 
 ## Environment
 
