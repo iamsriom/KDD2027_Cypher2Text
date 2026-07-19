@@ -1,6 +1,6 @@
 # CSEncoder: Hybrid Cypher Structure Encoder for Graph Query Translation
 
-KDD 2026 code submission for Cypher-to-Text and Text-to-Cypher translation.
+KDD 2027 code submission for Cypher-to-Text and Text-to-Cypher translation.
 
 ## Quick Repro (Reviewer Path)
 
@@ -44,9 +44,9 @@ No generated model outputs, result files, or credentials are committed.
 ## Citation
 
 ```bibtex
-@misc{csencoder_kdd2026,
+@misc{csencoder_kdd2027,
   title={CSEncoder: Hybrid Cypher Structure Encoder for Graph Query Translation},
-  year={2026}
+  year={2027}
 }
 ```
 
