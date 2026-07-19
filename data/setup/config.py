@@ -1,5 +1,5 @@
 """
-Data setup configuration for KDD2026_Cypher2Text.
+Data setup configuration for KDD2027_Cypher2Text.
 
 Central path constants and dataset defaults. Scripts under scripts/ and data/setup/
 should use these so the pipeline stays consistent with the KDD folder layout.

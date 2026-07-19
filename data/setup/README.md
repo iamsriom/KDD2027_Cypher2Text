@@ -1,6 +1,6 @@
-# Data setup (KDD2026_Cypher2Text)
+# Data setup (KDD2027_Cypher2Text)
 
-This folder holds configuration for the KDD2026 data pipeline.
+This folder holds configuration for the KDD2027 data pipeline.
 
 ## Layout
 

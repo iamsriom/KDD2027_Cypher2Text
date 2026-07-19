@@ -1,1 +1,1 @@
-# KDD2026_Cypher2Text data package
+# KDD2027_Cypher2Text data package

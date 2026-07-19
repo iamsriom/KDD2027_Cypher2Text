@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data pipeline for KDD2026_Cypher2Text: load neo4j/text2cypher-2024v1, summary, optional Neo4j execution.
+Data pipeline for KDD2027_Cypher2Text: load neo4j/text2cypher-2024v1, summary, optional Neo4j execution.
 
 Uses only HuggingFace Hub dataset neo4j/text2cypher-2024v1 (like util6/LLMTranslations/data.py).
 Summary includes distribution by database_reference_alias.
@@ -41,7 +41,7 @@ from data.setup.config import (
     DEFAULT_NEO4J_TIMEOUT_SECONDS,
 )
 
-LOGGER = logging.getLogger("kdd2026_data")
+LOGGER = logging.getLogger("kdd2027_data")
 DEFAULT_QUERY_LIMIT = 5
 DEFAULT_SLEEP_SECONDS = 0.0
 QUERY_RUN_EXCEPTION = "query_run_exception"
@@ -344,7 +344,7 @@ def execute_queries_for_split(
 
 def print_data_distribution(dataframes: dict[str, pd.DataFrame]) -> None:
     print("\n" + "=" * 80)
-    print("DATASET SUMMARY (KDD2026 pipeline)")
+    print("DATASET SUMMARY (KDD2027 pipeline)")
     print("=" * 80)
     for split_name, df in dataframes.items():
         if df.empty:
@@ -376,7 +376,7 @@ def print_data_distribution(dataframes: dict[str, pd.DataFrame]) -> None:
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="KDD2026 data pipeline: load neo4j/text2cypher-2024v1, summary, optional Neo4j execution."
+        description="KDD2027 data pipeline: load neo4j/text2cypher-2024v1, summary, optional Neo4j execution."
     )
     parser.add_argument(
         "--dataset-name",
