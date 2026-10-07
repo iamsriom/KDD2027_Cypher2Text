@@ -1,6 +1,8 @@
 # RUN.md
 
-Reproducible run instructions for KDD reviewers and for anyone reproducing results.
+Reproducible run instructions for KDD reviewers and anyone reproducing the hard-negative–finetuned CSEncoder.
+
+For method background (stages, slots, hyperparameters, file map), see [`README.md`](README.md).
 
 ---
 
@@ -9,118 +11,178 @@ Reproducible run instructions for KDD reviewers and for anyone reproducing resul
 - Python 3.10+
 - Hugging Face access to `neo4j/text2cypher-2024v1`
 - Optional for LLM stages: OpenAI API key
+- Full mine/finetune: GPU recommended; first mine downloads `sentence-transformers/all-mpnet-base-v2`
 
 From repo root:
 
 ```bash
 make install
+# if needed: make install PYTHON=python3
 ```
 
-Authentication options:
+Authentication:
 
-- Set environment variable:
-  ```bash
-  export HF_TOKEN=<your_hf_token>
-  ```
-- Or pass `--hf-token-path /path/to/token_file` to scripts.
+```bash
+export HF_TOKEN=<your_hf_token>
+# or pass --hf-token-path /path/to/token_file to scripts that accept it
+```
 
 ---
 
-## 2) Fast Repro Path (Recommended First)
+## 2) Fast Repro Path (smoke)
 
 ```bash
 make quick
 ```
 
-This runs:
+Runs:
 
-1. `python scripts/data.py --limit 10 --skip-query-execution`
-2. `python scripts/compute_idf_text2cypher.py --limit 10`
-3. `python scripts/train_csencoder.py --limit 10 --epochs 2 --batch-size 4 --seed 42`
+1. `scripts/data.py --limit 10 --skip-query-execution`
+2. `scripts/train_csencoder_pretrain.py --limit 10 --epochs 2 --batch-size 4 --seed 42`
+3. `scripts/mine_hard_examples.py --max-train-rows 10 --limit 10`
+4. `scripts/finetune_csencoder.py --epochs 1 --batch-size 4 --seed 42 --selected-epoch 1`
 
 Expected outputs:
 
 - `data/models/idf_scores_text2cypher.json`
+- `data/models/token_to_id.json` (`<UNK>=0`, lex-sorted)
+- `data/models/csencoder_pretrain.pt`
+- `data/supervision/selections/train_hard_examples_v2.jsonl`
 - `data/models/csencoder_model.pt`
-- `data/models/token_to_id.json`
 
 ---
 
-## 3) Full Core Pipeline
+## 3) Full Core Pipeline (paper training)
 
 ```bash
 make full
 ```
 
-Equivalent explicit commands:
+Explicit:
 
 ```bash
-python scripts/data.py --skip-query-execution
-python scripts/compute_idf_text2cypher.py
-python scripts/train_csencoder.py --epochs 5 --batch-size 32 --seed 42
+python3 scripts/data.py --skip-query-execution
+python3 scripts/train_csencoder_pretrain.py --epochs 5 --batch-size 16 --seed 42
+python3 scripts/mine_hard_examples.py
+python3 scripts/finetune_csencoder.py --seed 42 --epochs 4 --selected-epoch 1
 ```
+
+### Stage A — Pretrain
+
+Script: `scripts/train_csencoder_pretrain.py`
+
+Writes:
+
+- `data/models/token_to_id.json` / `data/models/vocab.json`
+- `data/models/idf_scores_text2cypher.json` / `data/models/idf_scores.json`
+- `data/models/csencoder_pretrain.pt` (prefers epoch 2)
+- `data/models/csencoder_pretrain_epoch_*.pt`
+- `data/models/pretrain_history.json`
+
+### Mining — Hard ± pairs
+
+Script: `scripts/mine_hard_examples.py`  
+Helpers: `csencoder/mining/`
+
+Writes under `data/supervision/`:
+
+- `selections/train_hard_examples_v2.jsonl` — main supervision file
+- `retrieval/` — BM25/MPNet top-k caches
+- `candidates/` — metric matrices
+- `reports/` — coverage diagnostics (full run only)
+- `data/train_split.jsonl` — cached HF train rows
+
+Useful flags:
+
+```bash
+python3 scripts/mine_hard_examples.py --limit 100          # pilot on first N anchors
+python3 scripts/mine_hard_examples.py --max-train-rows 500  # smaller corpus smoke
+python3 scripts/mine_hard_examples.py --mpnet-embeddings /path/to/train_cypher_embeddings.npy
+```
+
+If no cached MPNet `.npy` is provided, the script encodes train Cypher with `all-mpnet-base-v2`.
+
+### Stage B — Finetune
+
+Script: `scripts/finetune_csencoder.py`
+
+```bash
+python3 scripts/finetune_csencoder.py \
+  --init-checkpoint data/models/csencoder_pretrain.pt \
+  --vocab-path data/models/token_to_id.json \
+  --idf-path data/models/idf_scores_text2cypher.json \
+  --supervision data/supervision/selections/train_hard_examples_v2.jsonl \
+  --seed 42 --epochs 4 --selected-epoch 1
+```
+
+Writes:
+
+- `data/models/finetune/seed_42/epoch_{1..4}.pt`
+- `data/models/finetune/seed_42/config.json`
+- `data/models/finetune/seed_42/training_history.json`
+- `data/models/csencoder_model.pt` ← **selected epoch (default 1)**
+
+Defaults match the Neo4j experimental recipe (τ=0.07, bs=16, main lr `1e-5`, structural lr `3e-5`, weighted p1–p5 / n1–n4, n3/n4 ×2 oversample). Architecture is unchanged.
 
 ---
 
 ## 4) Optional Retrieval Stage
 
-After the core pipeline:
-
 ```bash
-python scripts/embed.py
-python scripts/similarity.py
+python3 scripts/embed.py
+python3 scripts/similarity.py
 ```
 
-Generated artifacts:
+Artifacts:
 
 - `data/chromadb/text2cypher/train`
 - `data/chromadb/text2cypher/test`
 - `data/results/similarity/similarity_results.json`
 - `data/results/similarity/similarity_results.txt`
 
----
-
-## 5) Optional Generation Stages
-
-### Cypher2Text
+Load a specific checkpoint:
 
 ```bash
-python scripts/cypher2text_cot.py --help
+python3 scripts/embed.py \
+  --model-path data/models/csencoder_model.pt \
+  --vocab-path data/models/token_to_id.json \
+  --idf-path data/models/idf_scores_text2cypher.json
 ```
-
-Typical (OpenAI) run:
-
-```bash
-python scripts/cypher2text_cot.py \
-  --models gpt4o-mini \
-  --similarity-json data/results/similarity/similarity_results.json \
-  --output-dir data/results/cypher2text
-```
-
-### Text2Cypher
-
-```bash
-python scripts/text2cypher_openai.py \
-  --in-jsonl <cypher2text_output.jsonl> \
-  --out-jsonl <text2cypher_output.jsonl> \
-  --model gpt-4o-mini
-```
-
-Use `--dry-run` to validate prompts without API calls.
 
 ---
 
-## 6) Reproducibility Notes
+## 5) Optional Generation
 
-- Training is seeded via `--seed` (default `42`).
-- Paths are repo-relative or home-relative (no hardcoded machine-specific `/home/...` defaults).
-- Generated artifacts are not required to be committed; rerun scripts to recreate.
+See docstrings in:
+
+- `scripts/cypher2text_cot.py`
+- `scripts/text2cypher_openai.py`
+
+These consume few-shot neighbors from the similarity stage.
 
 ---
 
-## 7) Troubleshooting
+## 6) File Checklist for Replication
 
-- **Missing HF auth**: set `HF_TOKEN` or provide `--hf-token-path`.
-- **Slow install / platform mismatch**: use a clean virtual environment.
-- **GPU issues**: run on CPU or set `CUDA_VISIBLE_DEVICES`.
-- **No similarity output**: ensure `embed.py` ran successfully before `similarity.py`.
+| Role | Location |
+|---|---|
+| Encoder definition | `csencoder/model/hybrid_cypher_graph_encoder.py` |
+| Graph + ANTLR | `csencoder/preprocessing/graph_builder.py`, `cypher_antlr_parser.py` |
+| Encode helpers | `csencoder/encoding.py` |
+| Inference API | `csencoder/embedder.py` |
+| Mining metrics / BM25 | `csencoder/mining/` |
+| Stage A | `scripts/train_csencoder_pretrain.py` |
+| Mine | `scripts/mine_hard_examples.py` |
+| Stage B | `scripts/finetune_csencoder.py` |
+| Final weights (built) | `data/models/csencoder_model.pt` |
+| Mined pairs (built) | `data/supervision/selections/train_hard_examples_v2.jsonl` |
+| Human study sheets | `HumanEvaluation/*.xlsx` |
+
+---
+
+## 7) Notes
+
+- Vocab contract: `<UNK>=0`; ids `1..V-1` lexicographically sorted; inference does not grow the vocab.
+- Graph features: ANTLR when available, regex fallback; `max_seq_len=512`.
+- Train split only for mining and Stage B; test is unused in training.
+- Large artifacts (`*.pt`, mined JSONL, Chroma) are gitignored by design.

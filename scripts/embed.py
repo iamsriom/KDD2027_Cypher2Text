@@ -2,11 +2,10 @@
 """
 Embed neo4j/text2cypher-2024v1 train/test Cypher queries and store in ChromaDB.
 
-Loads from HuggingFace Hub dataset neo4j/text2cypher-2024v1.
-Uses IDF from compute_idf_text2cypher.py and csencoder from train_csencoder.py.
-Outputs:
-  data/chromadb/text2cypher/train
-  data/chromadb/text2cypher/test
+Uses the DeterministicVocab / hard-neg finetuned CSEncoder artifacts:
+  data/models/csencoder_model.pt
+  data/models/token_to_id.json
+  data/models/idf_scores_text2cypher.json
 """
 
 from __future__ import annotations
@@ -39,8 +38,8 @@ except ImportError:
     DEFAULT_HF_DATASET_NAME = "neo4j/text2cypher-2024v1"
     DEFAULT_HF_TOKEN_PATH = Path.home() / "Huggingface_api.txt"
 
-from csencoder.embedder import EmbedderConfig, CSEmbedder
-from csencoder.preprocessing.rarity_calc import IDFCalculator
+from csencoder.embedder import CSEmbedder, EmbedderConfig
+from csencoder.encoding import MAX_LEN, load_vocab
 
 LOGGER = logging.getLogger("embed")
 
@@ -54,6 +53,7 @@ def ensure_hf_login(token_path: Path) -> None:
     if not os.getenv("HF_TOKEN"):
         raise FileNotFoundError(f"Hugging Face token required. Set HF_TOKEN or create {token_path}")
     from huggingface_hub import login as hf_login
+
     hf_login(token=os.environ["HF_TOKEN"], add_to_git_credential=False)
 
 
@@ -135,42 +135,14 @@ def store_collection(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Embed neo4j/text2cypher-2024v1 into ChromaDB.")
-    parser.add_argument(
-        "--dataset-name",
-        default=DEFAULT_HF_DATASET_NAME,
-        help="HuggingFace dataset (default: neo4j/text2cypher-2024v1)",
-    )
-    parser.add_argument(
-        "--hf-token-path",
-        type=Path,
-        default=DEFAULT_HF_TOKEN_PATH,
-        help="Hugging Face API token file",
-    )
-    parser.add_argument(
-        "--idf-path",
-        type=Path,
-        default=MODELS_DIR / "idf_scores_text2cypher.json",
-        help="IDF JSON from compute_idf_text2cypher.py",
-    )
-    parser.add_argument(
-        "--model-path",
-        type=Path,
-        default=MODELS_DIR / "csencoder_model.pt",
-        help="CSEncoder checkpoint from train_csencoder.py",
-    )
-    parser.add_argument(
-        "--out-db",
-        type=Path,
-        default=CHROMADB_DIR / "text2cypher",
-        help="ChromaDB output root",
-    )
-    parser.add_argument(
-        "--limit",
-        type=int,
-        default=None,
-        help="Limit per split. Omit for full; use e.g. --limit 50 for quick run.",
-    )
-    parser.add_argument("--max-seq-len", type=int, default=256)
+    parser.add_argument("--dataset-name", default=DEFAULT_HF_DATASET_NAME)
+    parser.add_argument("--hf-token-path", type=Path, default=DEFAULT_HF_TOKEN_PATH)
+    parser.add_argument("--idf-path", type=Path, default=MODELS_DIR / "idf_scores_text2cypher.json")
+    parser.add_argument("--vocab-path", type=Path, default=MODELS_DIR / "token_to_id.json")
+    parser.add_argument("--model-path", type=Path, default=MODELS_DIR / "csencoder_model.pt")
+    parser.add_argument("--out-db", type=Path, default=CHROMADB_DIR / "text2cypher")
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--max-seq-len", type=int, default=MAX_LEN)
     parser.add_argument(
         "--device",
         type=str,
@@ -192,26 +164,28 @@ def main() -> None:
         LOGGER.error("No train data loaded.")
         sys.exit(1)
 
+    if not args.vocab_path.exists():
+        raise SystemExit(f"Missing vocab {args.vocab_path}")
+    if not args.model_path.exists():
+        raise SystemExit(f"Missing model {args.model_path}")
+
+    token_to_id = load_vocab(args.vocab_path)
     idf_scores: Dict[str, float] = {}
     if args.idf_path.exists():
-        idf_scores = IDFCalculator().load(args.idf_path)
+        raw = json.loads(args.idf_path.read_text(encoding="utf-8"))
+        idf_scores = raw["idf_scores"] if isinstance(raw, dict) and "idf_scores" in raw else raw
         LOGGER.info("Loaded IDF: %d tokens from %s", len(idf_scores), args.idf_path)
-    else:
-        LOGGER.warning("IDF file not found at %s. Proceeding without rarity bias.", args.idf_path)
 
-    token_to_id: Dict[str, int] | None = None
-    token_path = MODELS_DIR / "token_to_id.json"
-    if token_path.exists():
-        token_to_id = json.loads(token_path.read_text(encoding="utf-8"))
-        LOGGER.info("Loaded vocab: %d tokens from %s", len(token_to_id), token_path)
-
-    model_path = args.model_path if args.model_path.exists() else None
-    cfg = EmbedderConfig(max_seq_len=args.max_seq_len, device=args.device)
+    cfg = EmbedderConfig(
+        vocab_size=len(token_to_id),
+        max_seq_len=args.max_seq_len,
+        device=args.device,
+    )
     embedder = CSEmbedder(
         config=cfg,
         idf_scores=idf_scores,
         token_to_id=token_to_id,
-        model_path=model_path,
+        model_path=args.model_path,
     )
 
     out_root = args.out_db.resolve()

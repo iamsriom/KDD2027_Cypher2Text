@@ -4,10 +4,10 @@ data/chromadb/*
 data/results/*
 !data/results/.gitkeep
 data/dataset/
-data/models/*.json
-data/models/*.pt
-data/models/token_to_id.json
+data/models/**
 !data/models/.gitkeep
+data/supervision/**
+!data/supervision/.gitkeep
 
 # Temp / cache
 data/_tmp_*/

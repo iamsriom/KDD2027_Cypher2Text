@@ -21,6 +21,7 @@ RESULTS_DIR = DATA_DIR / "results"
 MODELS_DIR = DATA_DIR / "models"
 CHROMADB_DIR = DATA_DIR / "chromadb"
 PRUNED_SCHEMAS_DIR = DATA_DIR / "pruned_schemas"
+SUPERVISION_DIR = DATA_DIR / "supervision"
 
 # Credentials (override via env or CLI)
 # Keep this user-portable instead of machine-specific hardcoded paths.
