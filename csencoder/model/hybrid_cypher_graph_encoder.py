@@ -23,8 +23,9 @@ class MagneticPE(nn.Module):
     """
     Magnetic Positional Encoding module.
 
-    Projects complex Magnetic Laplacian eigenvectors (real + imaginary parts)
-    to hidden dimension.
+    Projects the 16-D real MagPE features (8 complex eigenvectors: real then
+    imaginary parts of the unnormalized Hermitian Magnetic Laplacian) into the
+    hidden dimension. Interface is unchanged: ``pe_dim=16`` → ``hidden_dim``.
     """
 
     def __init__(self, pe_dim: int, hidden_dim: int):

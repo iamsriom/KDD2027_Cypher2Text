@@ -34,7 +34,9 @@ from csencoder.encoding import (  # noqa: E402
     encode_views,
     load_vocab,
     prepare_views,
+    validate_view_cache_version,
 )
+from csencoder.preprocessing.graph_builder import FEATURE_CACHE_VERSION  # noqa: E402
 
 try:
     from data.setup.config import MODELS_DIR
@@ -410,26 +412,43 @@ def main() -> int:
 
     if args.view_cache and (args.view_cache / "done.json").exists():
         meta = json.loads((args.view_cache / "done.json").read_text(encoding="utf-8"))
+        cache_version = meta.get("feature_cache_version")
+        if cache_version != FEATURE_CACHE_VERSION:
+            raise SystemExit(
+                f"--view-cache feature_cache_version={cache_version!r} != "
+                f"{FEATURE_CACHE_VERSION!r}; rebuild shards with the corrected MagPE/AST pipeline"
+            )
         train_views: List[dict] = []
         start = 0
         while start < meta["count"]:
             with (args.view_cache / f"shard_{start:06d}.pkl").open("rb") as handle:
                 shard = pickle.load(handle)
-            train_views.extend(item["view"] if isinstance(item, dict) and "view" in item else item for item in shard)
+            train_views.extend(
+                item["view"] if isinstance(item, dict) and "view" in item else item for item in shard
+            )
             start += int(meta["shard_size"])
         LOGGER.info("Loaded %d cached train views", len(train_views))
         if len(train_views) < len(cyphers):
             raise SystemExit("View cache shorter than supervision cypher index")
-        train_views = [attach_idf(v, idf_scores) if "idf" not in v else v for v in train_views[: len(cyphers)]]
+        train_views = [
+            attach_idf(v, idf_scores) if "idf" not in v else v for v in train_views[: len(cyphers)]
+        ]
+        validate_view_cache_version(train_views, label="--view-cache")
     else:
         cache_path = out / "train_views.pkl"
+        train_views = []
         if cache_path.exists():
             with cache_path.open("rb") as handle:
                 train_views = pickle.load(handle)
             if len(train_views) != len(cyphers):
+                LOGGER.warning("Discarding train_views.pkl (length mismatch); rebuilding")
                 train_views = []
-        else:
-            train_views = []
+            else:
+                try:
+                    validate_view_cache_version(train_views, label="train_views.pkl")
+                except RuntimeError as exc:
+                    LOGGER.warning("%s; rebuilding", exc)
+                    train_views = []
         if not train_views:
             LOGGER.info("Building %d train graph views", len(cyphers))
             train_views = [attach_idf(v, idf_scores) for v in prepare_views(cyphers, workers=args.workers)]
@@ -437,18 +456,23 @@ def main() -> int:
                 pickle.dump(train_views, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     p1_cache = out / "p1_views.pkl"
+    p1_views: List[dict] = []
     if p1_cache.exists():
         with p1_cache.open("rb") as handle:
             p1_views = pickle.load(handle)
-        if len(p1_views) != len(records):
+        if len(p1_views) != len(records) and len(p1_views) != len(cyphers):
+            LOGGER.warning("Discarding p1_views.pkl (length mismatch); rebuilding")
             p1_views = []
-    else:
-        p1_views = []
+        else:
+            try:
+                validate_view_cache_version(p1_views, label="p1_views.pkl")
+            except RuntimeError as exc:
+                LOGGER.warning("%s; rebuilding", exc)
+                p1_views = []
     if not p1_views:
         LOGGER.info("Building P1 views")
         # p1 views indexed by original anchor_id before remap — rebuild from remapped anchors
         # Use remapped examples' anchors to fetch p1 cypher from records by reverse map
-        rev = {v: k for k, v in id_map.items()}
         p1_cyphers = []
         for dense_id in range(len(cyphers)):
             # default identity

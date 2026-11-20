@@ -183,6 +183,8 @@ These consume few-shot neighbors from the similarity stage.
 ## 7) Notes
 
 - Vocab contract: `<UNK>=0`; ids `1..V-1` lexicographically sorted; inference does not grow the vocab.
-- Graph features: ANTLR when available, regex fallback; `max_seq_len=512`.
+- Graph features: ANTLR when available, offset-aware regex fallback; Hermitian MagPE (`γ=0.25`, `k=8` → 16-D) with phase canonicalization and deterministic degenerate bases; `max_seq_len=512`.
+- Feature caches (`train_views.pkl`, `p1_views.pkl`, `--view-cache`) must carry `feature_cache_version=magpe_hermitian_v2_ast_spans_v1`. Older caches are rejected/rebuilt. Retrain Stage A/B after this MagPE/AST fix; do not reuse prior weights as corrected results.
 - Train split only for mining and Stage B; test is unused in training.
 - Large artifacts (`*.pt`, mined JSONL, Chroma) are gitignored by design.
+- Unit/integration tests: `python3 -m pytest tests/ -v`.

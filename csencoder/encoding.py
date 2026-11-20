@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from csencoder.model.hybrid_cypher_graph_encoder import CSEncoder
 from csencoder.preprocessing.cypher_antlr_parser import AntlrCypherASTParser
-from csencoder.preprocessing.graph_builder import GraphBuilder
+from csencoder.preprocessing.graph_builder import FEATURE_CACHE_VERSION, GraphBuilder
 
 PE_DIM = 16
 MAX_LEN = 512
@@ -28,6 +28,7 @@ def blank_view() -> Dict[str, Any]:
         "tokens": [],
         "pe": np.zeros((0, PE_DIM), dtype=np.float32),
         "dist": np.zeros((0, 0), dtype=np.float32),
+        "feature_cache_version": FEATURE_CACHE_VERSION,
     }
 
 
@@ -49,7 +50,39 @@ def view_from_graph(graph: Dict[str, Any], max_len: int = MAX_LEN) -> Dict[str, 
         rows = min(length, raw_dist.shape[0])
         cols = min(length, raw_dist.shape[1])
         dist[:rows, :cols] = raw_dist[:rows, :cols]
-    return {"tokens": tokens, "pe": pe, "dist": dist}
+    version = graph.get("feature_cache_version", FEATURE_CACHE_VERSION)
+    return {
+        "tokens": tokens,
+        "pe": pe,
+        "dist": dist,
+        "feature_cache_version": version,
+    }
+
+
+def validate_view_cache_version(
+    views: Sequence[Dict[str, Any]],
+    *,
+    expected: str = FEATURE_CACHE_VERSION,
+    label: str = "view cache",
+) -> None:
+    """Reject graph-view caches built with a previous MagPE/AST feature version.
+
+    Every cached view must carry ``feature_cache_version == expected``; a single
+    stale or mixed-version entry fails the whole cache.
+    """
+    if not views:
+        return
+    for index, sample in enumerate(views):
+        if not isinstance(sample, dict):
+            raise RuntimeError(f"{label}: expected dict views with feature_cache_version")
+        version = sample.get("feature_cache_version")
+        if version != expected:
+            raise RuntimeError(
+                f"{label}: feature_cache_version={version!r} != {expected!r}"
+                f" (at index {index}). "
+                "Rebuild views with the corrected Hermitian MagPE + AST span pipeline; "
+                "do not reuse old train_views.pkl / p1_views.pkl / --view-cache shards."
+            )
 
 
 def _init_worker() -> None:

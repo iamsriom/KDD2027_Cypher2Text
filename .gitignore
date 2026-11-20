@@ -8,6 +8,31 @@ data/models/**
 !data/models/.gitkeep
 data/supervision/**
 !data/supervision/.gitkeep
+data/external/
+
+# Model weights / embeddings / caches (never commit)
+*.pt
+*.pth
+*.bin
+*.safetensors
+*.ckpt
+*.onnx
+*.npy
+*.npz
+*.pkl
+*.pickle
+
+# Secrets / credentials (never commit)
+.env
+.env.*
+*.pem
+*.key
+*credentials*
+*secret*
+Huggingface_api.txt
+OpenAI_api.txt
+Anthropic_api_key.txt
+Gemini_api.txt
 
 # Temp / cache
 data/_tmp_*/
