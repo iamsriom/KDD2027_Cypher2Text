@@ -96,7 +96,7 @@ HF train Cypher
 1. Tokenize all training Cypher with the Cypher regex tokenizer.
 2. Build a **lexicographically sorted** vocabulary; reserve `<UNK>` at id **0** (no hash vocab, no PAD-id growth at inference).
 3. Compute token IDF: `IDF(t) = log(N / (1 + df(t)))`.
-4. Build graph views (ANTLR AST when available, else regex): tokens, SPD matrix, Magnetic PE (`k=8` → 16-D).
+4. Build graph views (ANTLR AST when available, else offset-aware regex): tokens, SPD matrix, Hermitian Magnetic PE (`γ=0.25`, `k=8` → 16-D; see MagPE notes below).
 5. Positives = **bound-variable renaming** of the same query.
 6. Loss = **in-batch InfoNCE** on `(z(q), z(rename(q)))`, τ = 0.07.
 7. Optimizer AdamW, lr `1e-4`, weight decay `0.01`, grad clip `1.0`, batch 16, up to 5 epochs; keep **epoch 2** when available as `csencoder_pretrain.pt`.
@@ -209,13 +209,45 @@ python3 scripts/finetune_csencoder.py \
 
 ---
 
+## MagPE and AST→Token Mapping (implementation notes)
+
+These details match the camera-ready structural-encoding description. **Retrain and reevaluate CSEncoder after pulling this code.** Do not treat older checkpoints or `train_views.pkl` / `p1_views.pkl` / `--view-cache` shards as results of the corrected features. Published experimental tables in the manuscript are unchanged and are not claimed to have been produced with this corrected implementation.
+
+### Hermitian Magnetic Laplacian (`γ = 0.25`, `k = 8`)
+
+Unnormalized MagPE on the directed token graph adjacency `A`:
+
+\[
+A_s=\tfrac{A+A^\top}{2},\quad
+D_s=\mathrm{diag}(A_s\mathbf{1}),\quad
+\mathcal{L}^{(\gamma)}=D_s-A_s\odot\exp(\mathrm{i}\,2\pi\gamma(A-A^\top))
+\]
+
+- Complex Hermitian eigendecomposition (`numpy.linalg.eigh`); **do not** drop the imaginary part before `eigh`.
+- Take the `k=8` smallest-eigenvalue eigenvectors; concatenate real then imaginary parts → **16-D** real features per node (zero-pad when `n < 8`).
+- **Phase canonicalization:** rotate each selected vector so its largest-magnitude entry is real and nonnegative (smallest-index tie-break).
+- **Degenerate eigenspaces:** group eigenvalues within documented tolerance; build a deterministic ONB from the eigenspace projector with fixed coordinate order and Gram–Schmidt; if a group crosses the 8th eigenvector, take only the leading canonical vectors needed to fill `k`.
+
+Constant: `FEATURE_CACHE_VERSION = "magpe_hermitian_v2_ast_spans_v1"` in `graph_builder.py`. Stage B rejects caches missing this version.
+
+### AST→token source spans
+
+- Tokenizer: `CypherTokenizer.tokenize_with_offsets()` uses regex `match.start()` / `match.end()` on the **original** query (including leading whitespace). `tokenize()` stays string-only for compatibility.
+- ANTLR AST nodes carry half-open `[start, end)` character spans (shifted back if leading whitespace was trimmed only for the lexer).
+- Hierarchical edges use **token–AST span overlap**, never global substring matching of token text inside node text.
+- Regex fallback attaches clause/pattern spans from `re.Match` when available; otherwise the graph keeps sequence edges `(i→i+1)` and **omits** unsupported hierarchy (no fabricated AST edges).
+
+Automated coverage: `pytest tests/` (MagPE math, AST mapping, CSEncoder smoke).
+
+---
+
 ## Model Contract (inference)
 
 - Class: `CSEncoder` in `csencoder/model/hybrid_cypher_graph_encoder.py`
 - Wrapper: `CSEmbedder` in `csencoder/embedder.py`
 - Vocab: `<UNK>=0`; ids `1..V-1` lex-sorted train tokens; **no** vocab growth at inference
 - Sequence length: 512
-- Graph features: ANTLR when available, regex fallback
+- Graph features: ANTLR when available, offset-aware regex fallback; MagPE 16-D as above
 - Hidden size 768, 4 layers, 8 heads, PE dim 16
 
 ```python

@@ -1,9 +1,12 @@
-.PHONY: install quick full mine finetune embed
+.PHONY: install test quick full mine finetune embed
 
 PYTHON ?= python3
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
+
+test:
+	$(PYTHON) -m pytest tests/ -v
 
 # Smoke path: tiny pretrain + mine + 1-epoch hard-neg finetune
 quick:

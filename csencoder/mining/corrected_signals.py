@@ -12,7 +12,6 @@ import re
 
 import networkx as nx
 import numpy as np
-from scipy.linalg import eigh
 
 from csencoder.mining.schema_similarity import _NODE_RE  # noqa: E402
 
@@ -120,24 +119,14 @@ def pattern_digraph(cypher: str) -> nx.DiGraph:
 def magnetic_pe(cypher: str, q: float = Q_MAGNETIC, k: int = PE_EIGS) -> np.ndarray:
     """Real and imaginary parts of the Hermitian magnetic Laplacian eigenvectors.
 
-    Shape is (n_nodes, 2k). The second half is the imaginary part. Eigenvectors
-    are padded with zeros when the pattern has fewer than k nodes.
+    Uses the same unnormalized MagPE as ``graph_builder.compute_magnetic_laplacian``:
+    ``L = D_s - A_s ⊙ exp(i 2π q (A - A^T))`` with phase canonicalization.
+    Shape is ``(n_nodes, 2k)``.
     """
+    from csencoder.preprocessing.graph_builder import compute_magnetic_laplacian
+
     graph = pattern_digraph(cypher)
-    n_nodes = graph.number_of_nodes()
-    pe = np.zeros((n_nodes, 2 * k), dtype=np.float64)
-    if n_nodes == 0:
-        return pe
-    adjacency = nx.to_numpy_array(graph, nodelist=list(range(n_nodes)), dtype=float)
-    adjacency = adjacency.astype(np.complex128)
-    degree = np.sum(np.abs(adjacency), axis=1).real
-    laplacian = np.diag(degree) - adjacency * np.exp(1j * (2 * np.pi * q) * (adjacency - adjacency.T))
-    hermitian = (laplacian + laplacian.conj().T) / 2
-    hermitian = (hermitian + hermitian.conj().T) / 2
-    _values, vectors = eigh(hermitian, check_finite=False)
-    used = min(k, n_nodes)
-    pe[:, :used] = np.real(vectors[:, :used])
-    pe[:, k : k + used] = np.imag(vectors[:, :used])
+    _values, pe = compute_magnetic_laplacian(graph, q=q, k=k)
     return pe
 
 
