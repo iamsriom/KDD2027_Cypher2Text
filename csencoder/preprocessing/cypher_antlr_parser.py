@@ -712,13 +712,13 @@ class AntlrCypherASTParser:
         )
 
         for clause_type, content, start, end in self._extract_clauses(cypher):
-            if clause_type == "MATCH":
+            if clause_type in ("MATCH", "OPTIONAL_MATCH"):
                 patterns = self._extract_patterns(content, base_offset=start)
                 ast["patterns"].extend(patterns)
                 ast["children"].append(
                     _with_explicit_span(
                         {
-                            "type": "MATCH",
+                            "type": clause_type,
                             "content": content,
                             "patterns": patterns,
                             "text": content,
@@ -799,18 +799,33 @@ class AntlrCypherASTParser:
         return ast
 
     def _extract_clauses(self, cypher: str) -> List[tuple]:
-        """Extract main clauses with absolute ``[start, end)`` spans in ``cypher``."""
+        """Extract main clauses with absolute ``[start, end)`` spans in ``cypher``.
+
+        Consecutive ``MATCH`` / ``OPTIONAL MATCH`` clauses are split at the next
+        clause keyword (including another MATCH). ``OPTIONAL MATCH`` is matched
+        before bare ``MATCH`` so the OPTIONAL keyword is not mis-attributed.
+        """
         import re
 
         clauses = []
+        # Stop at the next top-level clause, including another MATCH / OPTIONAL MATCH.
+        _next_clause = (
+            r"WHERE|RETURN|WITH|CREATE|MERGE|DELETE|SET|REMOVE|"
+            r"ORDER\s+BY|LIMIT|SKIP|UNWIND|CALL|OPTIONAL\s+MATCH|MATCH"
+        )
         # Operate on the original string so match offsets stay aligned with the tokenizer.
+        # OPTIONAL MATCH must be listed before MATCH.
         clause_patterns = [
             (
-                r"(?is)\bMATCH\s+(.+?)(?=\b(?:WHERE|RETURN|WITH|CREATE|MERGE|DELETE|SET|REMOVE|ORDER\s+BY|LIMIT|SKIP|UNWIND|CALL)\b|$)",
+                rf"(?is)\bOPTIONAL\s+MATCH\s+(.+?)(?=\b(?:{_next_clause})\b|$)",
+                "OPTIONAL_MATCH",
+            ),
+            (
+                rf"(?is)\bMATCH\s+(.+?)(?=\b(?:{_next_clause})\b|$)",
                 "MATCH",
             ),
             (
-                r"(?is)\bWHERE\s+(.+?)(?=\b(?:RETURN|WITH|ORDER\s+BY|LIMIT|SKIP)\b|$)",
+                rf"(?is)\bWHERE\s+(.+?)(?=\b(?:RETURN|WITH|ORDER\s+BY|LIMIT|SKIP|OPTIONAL\s+MATCH|MATCH)\b|$)",
                 "WHERE",
             ),
             (
@@ -818,7 +833,7 @@ class AntlrCypherASTParser:
                 "RETURN",
             ),
             (
-                r"(?is)\bWITH\s+(.+?)(?=\b(?:WHERE|RETURN|MATCH|ORDER\s+BY|LIMIT|SKIP)\b|$)",
+                rf"(?is)\bWITH\s+(.+?)(?=\b(?:WHERE|RETURN|MATCH|OPTIONAL\s+MATCH|ORDER\s+BY|LIMIT|SKIP)\b|$)",
                 "WITH",
             ),
             (r"(?is)\bCREATE\s+(.+?)(?=\b(?:RETURN|WHERE)\b|$)", "CREATE"),
@@ -830,6 +845,11 @@ class AntlrCypherASTParser:
 
         for pattern, clause_type in clause_patterns:
             for match in re.finditer(pattern, cypher):
+                if clause_type == "MATCH":
+                    # Do not treat the MATCH inside OPTIONAL MATCH as a bare MATCH.
+                    prefix = cypher[: match.start()].rstrip()
+                    if re.search(r"(?i)\bOPTIONAL$", prefix):
+                        continue
                 # Span covers the captured content (group 1), not the keyword itself.
                 content = match.group(1)
                 start = match.start(1)

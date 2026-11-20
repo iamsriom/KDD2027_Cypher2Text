@@ -65,19 +65,24 @@ def validate_view_cache_version(
     expected: str = FEATURE_CACHE_VERSION,
     label: str = "view cache",
 ) -> None:
-    """Reject graph-view caches built with a previous MagPE/AST feature version."""
+    """Reject graph-view caches built with a previous MagPE/AST feature version.
+
+    Every cached view must carry ``feature_cache_version == expected``; a single
+    stale or mixed-version entry fails the whole cache.
+    """
     if not views:
         return
-    sample = views[0] if isinstance(views[0], dict) else None
-    if sample is None:
-        raise RuntimeError(f"{label}: expected dict views with feature_cache_version")
-    version = sample.get("feature_cache_version")
-    if version != expected:
-        raise RuntimeError(
-            f"{label}: feature_cache_version={version!r} != {expected!r}. "
-            "Rebuild views with the corrected Hermitian MagPE + AST span pipeline; "
-            "do not reuse old train_views.pkl / p1_views.pkl / --view-cache shards."
-        )
+    for index, sample in enumerate(views):
+        if not isinstance(sample, dict):
+            raise RuntimeError(f"{label}: expected dict views with feature_cache_version")
+        version = sample.get("feature_cache_version")
+        if version != expected:
+            raise RuntimeError(
+                f"{label}: feature_cache_version={version!r} != {expected!r}"
+                f" (at index {index}). "
+                "Rebuild views with the corrected Hermitian MagPE + AST span pipeline; "
+                "do not reuse old train_views.pkl / p1_views.pkl / --view-cache shards."
+            )
 
 
 def _init_worker() -> None:

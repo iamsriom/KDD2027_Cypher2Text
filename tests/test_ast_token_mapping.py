@@ -71,6 +71,39 @@ def test_repeated_variables_map_to_local_occurrences():
     assert spans[a_idxs[0]] != spans[a_idxs[1]]
 
 
+def test_consecutive_match_clauses_produce_distinct_ast_nodes():
+    query = "MATCH (a)-[:R]->(b)\nMATCH (a)-[:R]->(c)\nRETURN a"
+    parser = AntlrCypherASTParser()
+    ast = parser._parse_regex(query)
+    matches = [c for c in ast["children"] if c.get("type") == "MATCH"]
+    assert len(matches) == 2
+    assert matches[0]["start"] < matches[1]["start"]
+    assert matches[0]["end"] <= matches[1]["start"]
+    assert "b" in query[matches[0]["start"] : matches[0]["end"]]
+    assert "c" in query[matches[1]["start"] : matches[1]["end"]]
+    assert "b" not in query[matches[1]["start"] : matches[1]["end"]]
+    assert "c" not in query[matches[0]["start"] : matches[0]["end"]]
+
+
+def test_optional_match_clause_boundaries():
+    query = (
+        "MATCH (a:Person)\n"
+        "OPTIONAL MATCH (a)-[:KNOWS]->(b)\n"
+        "RETURN a, b"
+    )
+    parser = AntlrCypherASTParser()
+    ast = parser._parse_regex(query)
+    types = [c.get("type") for c in ast["children"]]
+    assert types.count("MATCH") == 1
+    assert types.count("OPTIONAL_MATCH") == 1
+    opt = next(c for c in ast["children"] if c["type"] == "OPTIONAL_MATCH")
+    plain = next(c for c in ast["children"] if c["type"] == "MATCH")
+    assert plain["end"] <= opt["start"]
+    assert "KNOWS" in query[opt["start"] : opt["end"]]
+    assert "Person" in query[plain["start"] : plain["end"]]
+    assert "OPTIONAL" not in query[plain["start"] : plain["end"]]
+
+
 def test_substring_identifiers_do_not_create_spurious_hierarchy():
     # 'a' is a substring of 'ab' — old heuristic linked them incorrectly.
     query = "MATCH (a:Label)-[:REL]->(ab:Label) RETURN a, ab"

@@ -33,6 +33,24 @@ def test_view_cache_rejects_old_version():
     )
 
 
+def test_view_cache_rejects_mixed_versions():
+    good = {
+        "tokens": [],
+        "pe": np.zeros((0, 16)),
+        "dist": np.zeros((0, 0)),
+        "feature_cache_version": FEATURE_CACHE_VERSION,
+    }
+    stale = {
+        "tokens": ["MATCH"],
+        "pe": np.zeros((1, 16)),
+        "dist": np.zeros((1, 1)),
+        "feature_cache_version": "legacy_magpe_v0",
+    }
+    with pytest.raises(RuntimeError, match="index 1"):
+        validate_view_cache_version([good, stale])
+    validate_view_cache_version([good, dict(good)])
+
+
 def test_end_to_end_encoder_embedding():
     query = "MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE a.name = b.name RETURN a, b"
     parser = AntlrCypherASTParser()
